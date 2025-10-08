@@ -45,6 +45,6 @@ def get_dataloader(dataset_name, batch_size=32, shuffle=True, num_workers=0, col
         dataset_name = dataset_name[len("hf-"):]
         dataset = load_hf_dataset(dataset_name)
     else:
-        dataset = load_dataset('json', data_files=dataset_name, split='train', streaming=True)
+        dataset = load_dataset('json', data_files=dataset_name)['train']
         
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)
