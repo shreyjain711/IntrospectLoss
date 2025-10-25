@@ -14,6 +14,14 @@ import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
+from sklearn.metrics import (
+    precision_score, 
+    recall_score, 
+    roc_auc_score, 
+    precision_recall_curve,
+    accuracy_score
+)
+
 from data_utils import get_dataloaders
 from mlp import MLP
 
@@ -90,32 +98,105 @@ def train(model, dataloader, optimizer, criterion, scheduler=None):
 
 def eval(model, dataloader, criterion=None):
     model.eval()
-    vloss, vacc = 0, 0
-    batch_bar   = tqdm(total=len(dataloader), dynamic_ncols=True, position=0, leave=False, desc='Val')
+    vloss = 0
+    
+    all_labels = []
+    all_probs = []
 
-    for i, (matrices, labels) in tqdm(enumerate(dataloader)):
+    batch_bar = tqdm(enumerate(dataloader),
+                     total=len(dataloader), 
+                     dynamic_ncols=True, 
+                     position=0, 
+                     leave=False, 
+                     desc='Val')
+
+    for i, (matrices, labels) in batch_bar:
         matrices = matrices.to(DEVICE)
-        labels   = labels.to(DEVICE).unsqueeze(1)
+        labels   = labels.to(DEVICE).unsqueeze(1) 
 
         with torch.inference_mode():
-            logits  = model(matrices)
-            loss    = criterion(logits, labels.float())
+            logits = model(matrices)
+            
+            if criterion:
+                loss = criterion(logits, labels.float())
+                vloss += loss.item()
 
-        vloss += loss.item()
-        vacc  += torch.sum((logits>0.5) == labels).item()/logits.shape[0]
+            probs = logits
+            all_labels.append(labels.cpu())
+            all_probs.append(probs.cpu())
 
-        batch_bar.set_postfix(loss="{:.04f}".format(float(vloss / (i + 1))),
-                              acc="{:.04f}%".format(float(vacc*100 / (i + 1))))
-        batch_bar.update()
-
-        del matrices, labels, logits
+        if criterion:
+            batch_bar.set_postfix(loss="{:.04f}".format(float(vloss / (i + 1))))
+        
+        del matrices, labels, logits, probs
         torch.cuda.empty_cache()
 
-    batch_bar.close()
-    vloss   /= len(dataloader)
-    vacc    /= len(dataloader)
+    # --- Metrics Calculation (after the loop) ---
 
-    return vloss, vacc
+    vloss /= len(dataloader)
+    
+    # Concatenate all batches into single tensors, then to 1D numpy arrays
+    all_labels = torch.cat(all_labels).squeeze().numpy()
+    all_probs = torch.cat(all_probs).squeeze().numpy()
+    
+    all_preds = (all_probs > 0.5).astype(int)
+    accuracy = accuracy_score(all_labels, all_preds)
+    
+    precision = precision_score(all_labels, all_preds, zero_division=0)
+    recall = recall_score(all_labels, all_preds, zero_division=0)
+    
+    # 2. AUC
+    try:
+        # roc_auc_score needs probabilities, not binary predictions
+        auc = roc_auc_score(all_labels, all_probs)
+    except ValueError as e:
+        # This can happen if only one class is present in the validation set
+        print(f"Warning: Could not calculate AUC. Only one class present? Error: {e}")
+        auc = 0.0 # Or np.nan
+
+    # 3. Precision at X Recall
+    # precision_recall_curve also needs probabilities
+    pr_curve, re_curve, _ = precision_recall_curve(all_labels, all_probs)
+    
+    def get_precision_at_recall(target_recall):
+        """Helper to find precision at a specific recall threshold."""
+        # Find all indices where recall is >= target_recall
+        indices = np.where(re_curve >= target_recall)[0]
+        if len(indices) > 0:
+            # We want the precision at the *last* index, which corresponds
+            # to the highest threshold (lowest recall) that still meets the target.
+            return pr_curve[indices[-1]]
+        else:
+            return 0.0 # Target recall was never met
+
+    pr_at_r80 = get_precision_at_recall(0.8)
+    pr_at_r90 = get_precision_at_recall(0.9)
+
+    # --- Return all metrics ---
+    
+    metrics = {
+        'loss': vloss,
+        'accuracy': accuracy,
+        'precision': precision,  # Precision at 0.5 threshold
+        'recall': recall,        # Recall at 0.5 threshold
+        'auc': auc,
+        'pr_at_r80': pr_at_r80,  # Precision when Recall >= 0.8
+        'pr_at_r90': pr_at_r90   # Precision when Recall >= 0.9
+    }
+    
+    # Optional: Print final metrics
+    print(f"\nValidation Metrics: \n"
+          f"  Loss:       {metrics['loss'] if metrics['loss'] is not None else 'N/A'}\n"
+          f"  Accuracy:   {metrics['accuracy']*100:.2f}%\n"
+          f"  Precision:  {metrics['precision']:.4f}\n"
+          f"  Recall:     {metrics['recall']:.4f}\n"
+          f"  AUC:        {metrics['auc']:.4f}\n"
+          f"  P@R80:      {metrics['pr_at_r80']:.4f}\n"
+          f"  P@R90:      {metrics['pr_at_r90']:.4f}\n")
+
+    return vloss, accuracy
+
+
 
 def run_expt(model, optimizer, criterion, scheduler, dropouts, expt_name):
         train_losses, train_accs = [], []
@@ -166,7 +247,7 @@ def run_expt(model, optimizer, criterion, scheduler, dropouts, expt_name):
         axes[3].set_ylabel('Accuracy')
 
         plt.tight_layout()
-        plt.savefig(expt_name.replace(" ", "_") + '.png')
+        plt.savefig('outputs/'+expt_name.replace(" ", "_") + '.png')
 
         model.load_state_dict(best_vloss_model_state_dict)
         return model
@@ -198,9 +279,9 @@ if __name__ == "__main__":
     plt.xlabel('Layer Index')
     plt.ylabel('Learned Weight')
     plt.title(f'Learned Layer Weights - {model_name} - lin_agt')
-    plt.savefig(f'{model_name}_layer_weights_lin_agt.png')
+    plt.savefig(f'outputs/{model_name}_layer_weights_lin_agt.png')
     
-    torch.save(model.state_dict(), f'{model_name}_mlp_mode_lin_agt.pth')
+    torch.save(model.state_dict(), f'outputs/{model_name}_mlp_mode_lin_agt.pth')
 
 
     # model lyr_MIDDLE_LAYER
@@ -210,4 +291,4 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
 
     run_expt(model, optimizer, criterion, scheduler, dropouts, expt_name=f'{model_name}_mode_lyr_{str(MIDDLE_LAYER)}')
-    torch.save(model.state_dict(), f'{model_name}_mlp_mode_lyr_{str(MIDDLE_LAYER)}.pth')
+    torch.save(model.state_dict(), f'outputs/{model_name}_mlp_mode_lyr_{str(MIDDLE_LAYER)}.pth')
