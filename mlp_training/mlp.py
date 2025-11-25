@@ -27,7 +27,8 @@ class MLP(torch.nn.Module):
         # x: (batch_size, num_tgt_model_layers, layer_dims[0])
         # apply learnable weights to each layer
         if self.mode == 'lin_agt':
-            weights = torch.softmax(self.layer_weights, dim=0)  # normalize across layers
+            current_weights = self.layer_weights.to(x.device)
+            weights = torch.softmax(current_weights, dim=0)     # normalize across layers
             x = (x * weights.view(1, -1, 1)).sum(dim=1)         # shape -> (batch_size, 4096)
         
         elif self.mode == 'avg_agt':

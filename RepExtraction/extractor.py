@@ -13,7 +13,21 @@ if introspect_path not in sys.path:
 from utils.dataloader import get_dataloader
 
 
-def extract_representations(model_name, dataloader, output_path, layer_indices=None, device=('cuda' if torch.cuda.is_available() else 'cpu')):
+def make_chat_format(user_m, assistant_m):
+    return [{'role': 'user', 'content': user_m}, {'role': 'assistant', 'content': assistant_m}]
+
+def format_with_response(batch):
+    messages = []
+    for d in batch['origin_data']:
+        d = json.loads(d)
+        if 'prompt' in d:
+            u_m, a_m = d['prompt'], d['response']
+        else:
+            u_m, a_m = d['question'], d['answer']
+        messages.append(make_chat_format(u_m, a_m))
+    return messages
+
+def extract_representations(model_name, dataloader, output_path, layer_indices=None, device=('cuda' if torch.cuda.is_available() else 'cpu'), use_response=False):
     """
     Loads a Hugging Face causal LM model and extracts internal representations from specified layers.
 
@@ -52,8 +66,21 @@ def extract_representations(model_name, dataloader, output_path, layer_indices=N
             for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader), desc="Extracting representations"):
                 batch_size = len(batch['prompt'])
                 exec_device = next(iter(model.parameters())).device
-                inputs = tokenizer(batch['prompt'], return_tensors='pt', padding=True, truncation=True)
-                inputs = {k: v.to(exec_device) for k, v in inputs.items()}
+                
+                inputs = batch['prompt']
+                if use_response:
+                    inputs = format_with_response(batch)
+                    inputs = tokenizer.apply_chat_template(
+                                inputs,
+                                tokenize=True,
+                                add_generation_prompt=False,
+                                return_tensors="pt",
+                                padding=True,
+                                return_dict=True,
+                            ).to(model.device)
+                else:
+                    inputs = tokenizer(inputs, return_tensors='pt', padding=True, truncation=True).to(exec_device)
+                
                 outputs = model(**inputs, use_cache=False)
                 
                 cpu_layers = []
@@ -85,6 +112,7 @@ if __name__ == "__main__":
     argparser.add_argument('--dataset', type=str, default='train', choices=['train', 'test'], help="Dataset to use: 'train' or 'test'.")
     argparser.add_argument('--batch_size', type=int, default=32, help="Batch size for dataloader.")
     argparser.add_argument('--model', type=str, default='l3_8', choices=['q3_4', 'q3_8', 'l3_8'], help="Model to use: 'q3_4' (Qwen-3-4B), 'q3_8' (Qwen-3-8B), or 'l3_8' (Llama-3.1-8B).")
+    argparser.add_argument('--use_response', action='store_true', help='If present, include the response when formatting inputs')
     args = argparser.parse_args()
 
     datasets = {'train': "/ocean/projects/cis250042p/sjain13/IntrospectLoss/RepExtraction/input_data/combined_8500.json", 'test': "/ocean/projects/cis250042p/sjain13/IntrospectLoss/RepExtraction/input_data/combined_4000_test.json"}
@@ -94,9 +122,9 @@ if __name__ == "__main__":
     model_name = ({"q3_4": "Qwen/Qwen3-4B-Instruct-2507", "q3_8": "Qwen/Qwen3-8B", "l3_8": "meta-llama/Llama-3.1-8B-Instruct"}).get(args.model)
     layer_indices = None # None for all layers else list of numbers
 
-    dataloader = get_dataloader(dataset_name, batch_size=batch_size, shuffle=False)
+    dataloader = get_dataloader(dataset_name, batch_size=batch_size, shuffle=False, use_response=args.use_response)
     
     print(f"Number of batches in dataloader: {len(dataloader)}")
 
-    output_path = f"/ocean/projects/cis250042p/sjain13/IntrospectLoss/RepExtraction/representations/{dataset_name.split('/')[-1].split('.')[0]}/{model_name.replace('/', '_')}_reps.json"
-    extract_representations(model_name, dataloader, output_path, layer_indices=layer_indices)
+    output_path = f"/ocean/projects/cis250042p/sjain13/IntrospectLoss/RepExtraction/representations/{dataset_name.split('/')[-1].split('.')[0]}/{model_name.replace('/', '_')}_{'response_' if args.use_response else ''}reps.json"
+    extract_representations(model_name, dataloader, output_path, layer_indices=layer_indices, use_response=args.use_response)

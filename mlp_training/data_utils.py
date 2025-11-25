@@ -69,28 +69,27 @@ class LazyLayerRepSafeDataset(Dataset):
 
 
 def get_dataloaders(train_dataset_path, val_dataset_path, batch_size, layers=None, n_workers=8, train_subset=None, val_subset=None):
-    train_data = LayerRepSafeDataset(train_dataset_path, layers=layers, subset=train_subset)
-    val_data = LayerRepSafeDataset(val_dataset_path, layers=layers, subset=val_subset)
+    train_loader, val_loader = None, None
+    if train_dataset_path is not None:
+        train_data = LayerRepSafeDataset(train_dataset_path, layers=layers, subset=train_subset)
+        train_loader = torch.utils.data.DataLoader(
+            dataset     = train_data,
+            num_workers = n_workers,
+            batch_size  = batch_size,
+            pin_memory  = True,
+            shuffle     = True
+        )
+        print(f"Train dataset samples = {train_data.__len__()}, batches = {len(train_loader)}")
     
-    # train_data = LazyLayerRepSafeDataset(train_dataset_path, layers=layers, subset=train_subset)
-    # val_data = LazyLayerRepSafeDataset(val_dataset_path, layers=layers, subset=val_subset)
-    
-    train_loader = torch.utils.data.DataLoader(
-        dataset     = train_data,
-        num_workers = n_workers,
-        batch_size  = batch_size,
-        pin_memory  = True,
-        shuffle     = True
-    )
-    
-    val_loader = torch.utils.data.DataLoader(
-        dataset     = val_data,
-        num_workers = n_workers,
-        batch_size  = batch_size,
-        pin_memory  = True
-    )
-
-    print(f"Train dataset samples = {train_data.__len__()}, batches = {len(train_loader)}")
-    print(f"Validation dataset samples = {val_data.__len__()}, batches = {len(val_loader)}")
+    if val_dataset_path is not None:
+        val_data = LayerRepSafeDataset(val_dataset_path, layers=layers, subset=val_subset)
+        
+        val_loader = torch.utils.data.DataLoader(
+            dataset     = val_data,
+            num_workers = n_workers,
+            batch_size  = batch_size,
+            pin_memory  = True
+        )
+        print(f"Validation dataset samples = {val_data.__len__()}, batches = {len(val_loader)}")
     
     return train_loader, val_loader

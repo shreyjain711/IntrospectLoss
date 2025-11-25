@@ -27,7 +27,7 @@ def load_hf_dataset(dataset_name, split='train', **kwargs):
     dataset = dataset.map(sanitize)
     return dataset
 
-def get_dataloader(dataset_name, batch_size=32, shuffle=True, num_workers=0, collate_fn=None):
+def get_dataloader(dataset_name, batch_size=32, shuffle=True, num_workers=0, collate_fn=None, use_response=False):
     """
     Returns a PyTorch DataLoader for a Hugging Face dataset.
 
@@ -46,5 +46,15 @@ def get_dataloader(dataset_name, batch_size=32, shuffle=True, num_workers=0, col
         dataset = load_hf_dataset(dataset_name)
     else:
         dataset = load_dataset('json', data_files=dataset_name)['train']
-        
+
+    # if use_response:
+    #     def _has_value(ex):
+    #         v = ex.get('response', ex.get('answer', None))
+    #         if v is None:
+    #             return False
+    #         if isinstance(v, str):
+    #             return v.strip() != ''
+    #         return True
+    #     dataset = dataset.filter(_has_value)
+    
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn)

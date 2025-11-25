@@ -47,6 +47,7 @@ INTERNAL_REP_SIZE = ({"q3_4": 2560, "q3_8": 4096, "l3_8": 4096}).get(model_name)
 
 TRAIN_DATASET_PATH = f'../RepExtraction/representations/combined_8500/{LLM}_reps.json'
 VAL_DATASET_PATH = f'../RepExtraction/representations/combined_4000_test/{LLM}_reps.json'
+RESPONSE_VAL_DATASET_PATH = f'../RepExtraction/representations/combined_4000_test/{LLM}_response_reps.json'
 
 MLP_DIMS = [INTERNAL_REP_SIZE, 1024, 512, 1]
 INIT_LR = 1e-3
@@ -260,7 +261,8 @@ if __name__ == "__main__":
     if SEED is not None:
         torch.manual_seed(SEED)
         np.random.seed(SEED)
-    train_loader, val_loader = get_dataloaders(TRAIN_DATASET_PATH, VAL_DATASET_PATH, BATCH_SIZE, layers=None, n_workers=8)#, train_subset=128, val_subset=10)
+    # train_loader, val_loader = get_dataloaders(TRAIN_DATASET_PATH, VAL_DATASET_PATH, BATCH_SIZE, layers=None, n_workers=8)
+    train_loader, val_loader = get_dataloaders(TRAIN_DATASET_PATH, RESPONSE_VAL_DATASET_PATH, BATCH_SIZE, layers=None, n_workers=8)
 
     criterion = torch.nn.BCEWithLogitsLoss()
     
@@ -279,9 +281,9 @@ if __name__ == "__main__":
     plt.xlabel('Layer Index')
     plt.ylabel('Learned Weight')
     plt.title(f'Learned Layer Weights - {model_name} - lin_agt')
-    plt.savefig(f'outputs/{model_name}_layer_weights_lin_agt.png')
+    plt.savefig(f'outputs/response_{model_name}_layer_weights_lin_agt.png')
     
-    torch.save(model.state_dict(), f'outputs/{model_name}_mlp_mode_lin_agt.pth')
+    torch.save(model.state_dict(), f'outputs/response_{model_name}_mlp_mode_lin_agt.pth')
 
 
     # model lyr_MIDDLE_LAYER
@@ -290,5 +292,5 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=INIT_LR)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
 
-    run_expt(model, optimizer, criterion, scheduler, dropouts, expt_name=f'{model_name}_mode_lyr_{str(MIDDLE_LAYER)}')
-    torch.save(model.state_dict(), f'outputs/{model_name}_mlp_mode_lyr_{str(MIDDLE_LAYER)}.pth')
+    run_expt(model, optimizer, criterion, scheduler, dropouts, expt_name=f'response_{model_name}_mode_lyr_{str(MIDDLE_LAYER)}')
+    torch.save(model.state_dict(), f'outputs/{model_name}_mlp_mode_lyr_{str(MIDDLE_LAYER)}_response.pth')
